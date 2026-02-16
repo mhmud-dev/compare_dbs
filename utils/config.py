@@ -30,7 +30,7 @@ class BenchmarkConfig:
 
     iterations: int = 1000
     warmup_iterations: int = 100
-    batch_sizes: tuple = (1, 10, 100, 1000)
+    batch_sizes: tuple = (10, 100, 1000, 5000)
     test_scenarios: tuple = ("single_insert", "batch_insert", "concurrent_insert")
     result_output_dir: str = "./results"
 
