@@ -1,17 +1,7 @@
-#!/usr/bin/env python3
-"""
-Database Benchmark Application
-Run: python main.py --help
-"""
-
 import argparse
 import sys
 from pathlib import Path
 import os
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
 from utils.config import ConfigManager
 from benchmark.benchmark_runner import BenchmarkRunner
 
