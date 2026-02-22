@@ -16,7 +16,7 @@ def parse_args():
         "--test",
         type=str,
         choices=["single", "batch", "all"],
-        default="batch",
+        default="all",
         help="Test type to run (default: all)",
     )
 
@@ -45,7 +45,7 @@ def parse_args():
         "--db",
         type=str,
         choices=["postgres", "mariadb"],
-        default="mariadb",
+        default="postgres",
         help="Test DB (default: postgres)",
     )
 
