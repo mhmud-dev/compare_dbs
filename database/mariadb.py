@@ -188,13 +188,6 @@ class MariaDBRepository(DatabaseRepository):
         columns = list(data[0].keys())
         if len(data) == 1:
             return self.insert_row(table_name, data[0])
-        if len(data) <= 10:
-            placeholders = ", ".join(["%s"] * len(columns))
-            query = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
-            values = [tuple(row.values()) for row in data]
-            with self.connection.transaction() as cursor:
-                cursor.executemany(query, values)
-                return len(data)
         placeholders = ", ".join(["%s"] * len(columns))
         multi_placeholders = ", ".join([f"({placeholders})" for _ in data])
         query = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES {multi_placeholders}"
