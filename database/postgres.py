@@ -1,103 +1,161 @@
+import threading
 import psycopg2
-from psycopg2 import OperationalError
-from typing import Any, Dict, List, Optional
+from psycopg2 import extras
+from typing import Any, Dict, List
 from contextlib import contextmanager
 from .interfaces import DatabaseConnection, DatabaseRepository
 from utils.config import DatabaseConfig
 
 
-class PostgreSQLConnection(DatabaseConnection):
-    """PostgreSQL connection - simplified for fair comparison with MariaDB"""
-
-    def __init__(self, config: DatabaseConfig):
-        self.config = config
-        self._connection = None
-
-    def connect(self) -> Any:
-        """Establish PostgreSQL connection"""
+class PostgreSQLConnectionPool:
+    """Thread-safe connection pool for PostgreSQL"""
+    
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+            return cls._instance
+    
+    def __init__(self, config: DatabaseConfig, min_conn: int = 10, max_conn: int = 1000):
+        if not hasattr(self, 'initialized'):
+            self.config = config
+            self.min_conn = min_conn
+            self.max_conn = max_conn
+            self._pool = None
+            self._local = threading.local()
+            self.initialized = True
+            self._init_pool()
+    
+    def _init_pool(self):
+        """Initialize connection pool"""
         try:
-            self._connection = psycopg2.connect(
+            self._pool = psycopg2.pool.ThreadedConnectionPool(
+                self.min_conn,
+                self.max_conn,
                 host=self.config.host,
                 port=self.config.port,
                 user=self.config.user,
                 password=self.config.password,
                 database=self.config.database,
-                connect_timeout=30,
-                # Keep these for connection stability (minimal impact)
                 keepalives=1,
                 keepalives_idle=30,
                 keepalives_interval=10,
                 keepalives_count=5,
+                connect_timeout=30,
+                options="-c statement_timeout=30000"
             )
-            # Match MariaDB's autocommit behavior
-            self._connection.autocommit = False
-            return self._connection
-        except OperationalError as e:
-            raise ConnectionError(f"Failed to connect to PostgreSQL: {e}")
-
-    def disconnect(self) -> None:
-        """Close PostgreSQL connection"""
-        if self._connection and not self._connection.closed:
-            self._connection.close()
-            self._connection = None
-
-    def ensure_connection(self):
-        """Ensure connection is active"""
-        if not self._connection or self._connection.closed:
-            self.connect()
-
+        except Exception as e:
+            raise ConnectionError(f"Failed to create connection pool: {e}")
+    
     @contextmanager
-    def get_cursor(self):
-        """Context manager for database cursor - simplified"""
-        self.ensure_connection()
-        cursor = None
+    def get_connection(self):
+        """Get connection from pool with thread-local caching"""
+        conn = None
         try:
-            cursor = self._connection.cursor()
-            yield cursor
-        finally:
-            if cursor:
-                cursor.close()
+            if hasattr(self._local, 'conn') and self._local.conn and not self._local.conn.closed:
+                conn = self._local.conn
+            else:
+                conn = self._pool.getconn()
+                self._local.conn = conn
+            
+            yield conn
+        except Exception as e:
+            if conn:
+                self._pool.putconn(conn, close=True)
+                if hasattr(self._local, 'conn'):
+                    delattr(self._local, 'conn')
+            raise e
+    
+    def return_connection(self, conn, close=False):
+        """Return connection to pool"""
+        if conn:
+            try:
+                self._pool.putconn(conn, close=close)
+                if hasattr(self._local, 'conn') and self._local.conn == conn:
+                    delattr(self._local, 'conn')
+            except Exception:
+                pass
+    
+    def close_all(self):
+        """Close all connections in pool"""
+        if self._pool:
+            self._pool.closeall()
 
+
+class PostgreSQLConnection(DatabaseConnection):
+    """PostgreSQL connection using connection pool for multi-threading"""
+    
+    def __init__(self, config: DatabaseConfig):
+        self.config = config
+        self._pool = PostgreSQLConnectionPool(config)
+        self._local = threading.local()
+    
+    def connect(self) -> Any:
+        """Connection is handled by pool - returns None as we don't maintain persistent connection"""
+        return None
+    
+    def disconnect(self) -> None:
+        """Return connection to pool if exists"""
+        if hasattr(self._local, 'conn'):
+            self._pool.return_connection(self._local.conn)
+            delattr(self._local, 'conn')
+    
+    @contextmanager
+    def get_cursor(self, commit: bool = False):
+        """Get cursor with automatic connection management"""
+        with self._pool.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                yield cursor
+                if commit:
+                    conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
+    
     @contextmanager
     def transaction(self):
-        """Transaction context manager - identical to MariaDB version"""
-        self.ensure_connection()
-        cursor = None
-        try:
-            cursor = self._connection.cursor()
-            yield cursor
-            self._connection.commit()
-        except Exception as e:
-            if self._connection:
-                self._connection.rollback()
-            raise e
-        finally:
-            if cursor:
+        """Transaction context manager"""
+        with self._pool.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                yield cursor
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
                 cursor.close()
-
-    def execute_query(self, query: str, params: tuple = None) -> Any:
-        """Execute SQL query with parameters"""
-        self.ensure_connection()
-        if params is not None and not isinstance(params, (tuple, dict)):
-            params = (params,)
-        cursor = self._connection.cursor()
-        try:
-            cursor.execute(query, params)
-            return cursor
-        except:
-            cursor.close()
-            raise
-
-    def executemany(self, query: str, params: List[tuple]) -> Any:
-        """Execute SQL query with multiple parameter sets"""
-        self.ensure_connection()
-        cursor = self._connection.cursor()
-        try:
-            cursor.executemany(query, params)
-            return cursor
-        except:
-            cursor.close()
-            raise
+    
+    def execute_query(self, query: str, params: tuple = None) -> List[tuple]:
+        """Execute query and return results"""
+        with self.get_cursor(commit=False) as cursor:
+            cursor.execute(query, params or ())
+            if cursor.description:  # SELECT query
+                return cursor.fetchall()
+            return []  # Non-SELECT query
+    
+    def execute_values(self, query: str, values: List[tuple], page_size: int = 1000):
+        """Execute batch insert with execute_values"""
+        with self.transaction() as cursor:
+            extras.execute_values(
+                cursor, query, values, template=None, page_size=page_size
+            )
+    
+    def executemany(self, query: str, values: List[tuple], page_size: int = 1000):
+        """Execute many with optimal batch size"""
+        if not values:
+            return
+        if query.strip().upper().startswith('INSERT'):
+            self.execute_values(query, values, page_size)
+        else:
+            with self.transaction() as cursor:
+                cursor.executemany(query, values)
 
     def commit(self) -> None:
         """Commit transaction"""
@@ -108,12 +166,11 @@ class PostgreSQLConnection(DatabaseConnection):
         """Rollback transaction"""
         if self._connection:
             self._connection.rollback()
-
+    
     @property
     def is_connected(self) -> bool:
-        """Check if connection is active"""
-        return self._connection is not None and not self._connection.closed
-
+        """Check if current thread has active connection"""
+        return hasattr(self._local, 'conn') and not self._local.conn.closed
 
 class PostgreSQLRepository(DatabaseRepository):
     """PostgreSQL repository - simplified for fair comparison with MariaDB"""
