@@ -70,6 +70,7 @@ class ConcurrentInsertBenchmark(BaseBenchmark):
             self.repository.insert_row(self.table_name, data)
             iteration_time = time.time() - iteration_start
             worker_timings.append(iteration_time)
+            self.notify_iteration(i + 1, self.iterations)
         return worker_timings
 
     def _execute_benchmark(self, metrics: BenchmarkMetrics) -> None:
