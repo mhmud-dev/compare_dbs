@@ -1,7 +1,7 @@
 from datetime import datetime
 from utils.config import ConfigManager
 from database.connection_factory import DatabaseConnectionFactory
-from benchmark.strategies import SingleInsertBenchmark, BatchInsertBenchmark
+from benchmark.strategies import SingleInsertBenchmark, BatchInsertBenchmark, ConcurrentInsertBenchmark
 from metrics.collector import MetricsCollector
 from metrics.reporter import ReportGenerator
 
@@ -62,6 +62,31 @@ class BenchmarkRunner:
                 iterations=self.benchmark_config.iterations,
                 warmup_iterations=self.benchmark_config.warmup_iterations,
                 batch_size=batch_size,
+            )
+            benchmark.attach(self.metrics_collector)
+            try:
+                connection.connect()
+                benchmark.execute()
+            finally:
+                benchmark.cleanup()
+                connection.disconnect()
+
+    def run_concurrent_insert_benchmark(self) -> None:
+        """Run concurrent insert benchmark for all databases"""
+        print("\n" + "=" * 80)
+        print("RUNNING CONCURRENT INSERT BENCHMARK")
+        print("=" * 80)
+        connection = self.connection_factory.create_connection(self.config_manager)
+        repository = self.connection_factory.create_repository(connection)
+        for num_worker in self.benchmark_config.workers:
+            benchmark = ConcurrentInsertBenchmark(
+                repository=repository,
+                database_type=self.db_config.database,
+                test_name=f"concurrent_insert_{num_worker}",
+                table_name=self.db_config.table,
+                iterations=self.benchmark_config.iterations,
+                warmup_iterations=self.benchmark_config.warmup_iterations,
+                max_workers=num_worker,
             )
             benchmark.attach(self.metrics_collector)
             try:
