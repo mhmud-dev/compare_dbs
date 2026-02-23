@@ -15,9 +15,9 @@ def parse_args():
     parser.add_argument(
         "--test",
         type=str,
-        choices=["single", "batch", "all"],
-        default="all",
-        help="Test type to run (default: all)",
+        choices=["single", "batch", "concurrent"],
+        default="single",
+        help="Test type to run (default: single)",
     )
 
     parser.add_argument(
@@ -61,12 +61,15 @@ def main():
     try:
         config_manager = ConfigManager(args.iterations, args.warmup)
         runner = BenchmarkRunner(config_manager, args.db)
-        runner.report_generator.output_dir = Path(args.output_dir)
-        os.makedirs(args.output_dir, exist_ok=True)
-        if args.test == "single" or args.test == "all":
+        output_dir = os.path.join(args.output_dir, args.db)
+        runner.report_generator.output_dir = Path(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        if args.test == "single":
             runner.run_single_insert_benchmark()
-        if args.test == "batch" or args.test == "all":
+        if args.test == "batch":
             runner.run_batch_insert_benchmark()
+        if args.test == "concurrent":
+            runner.run_concurrent_insert_benchmark()
         runner.generate_reports()
     except KeyboardInterrupt:
         print("\n\nBenchmark interrupted by user.")
