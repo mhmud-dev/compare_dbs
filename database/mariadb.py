@@ -1,58 +1,72 @@
 import mariadb
 from typing import Any, Dict, List, Optional
 from contextlib import contextmanager
+import threading
 from .interfaces import DatabaseConnection, DatabaseRepository
 from utils.config import DatabaseConfig
 
 
 class MariaDBConnection(DatabaseConnection):
     """MariaDB connection"""
-
+    
     def __init__(self, config: DatabaseConfig):
         self.config = config
-        self._connection = None
-        self._cursor = None
+        self._local = threading.local()
+        self._connection_created = False
+
+    def _get_connection(self):
+        """Get or create thread-local connection"""
+        if not hasattr(self._local, 'connection') or self._local.connection is None:
+            try:
+                connection_params = {
+                    "host": self.config.host,
+                    "port": self.config.port,
+                    "user": self.config.user,
+                    "password": self.config.password,
+                    "database": self.config.database,
+                    "autocommit": False,
+                    "connect_timeout": 30,
+                    "ssl": False,
+                    "local_infile": False,
+                }
+                self._local.connection = mariadb.connect(**connection_params)
+                self._local.connection.autocommit = False
+                self._connection_created = True
+            except mariadb.Error as e:
+                raise ConnectionError(f"Failed to connect to MariaDB: {e}")
+        return self._local.connection
+
+    def _get_cursor(self):
+        """Get or create thread-local cursor"""
+        if not hasattr(self._local, 'cursor') or self._local.cursor is None:
+            conn = self._get_connection()
+            self._local.cursor = conn.cursor()
+        return self._local.cursor
 
     def connect(self) -> Any:
-        """Establish MariaDB connection"""
-        try:
-            connection_params = {
-                "host": self.config.host,
-                "port": self.config.port,
-                "user": self.config.user,
-                "password": self.config.password,
-                "database": self.config.database,
-                "autocommit": False,
-                "connect_timeout": 30,
-                "ssl": False,
-                "local_infile": False,
-            }
-            self._connection = mariadb.connect(**connection_params)
-            return self._connection
-        except mariadb.Error as e:
-            raise ConnectionError(f"Failed to connect to MariaDB: {e}")
+        """Establish MariaDB connection for current thread"""
+        return self._get_connection()
 
     def disconnect(self) -> None:
-        """Close MariaDB connection"""
-        if self._cursor:
+        """Close MariaDB connection for current thread"""
+        if hasattr(self._local, 'cursor') and self._local.cursor:
             try:
-                self._cursor.close()
+                self._local.cursor.close()
             except:
                 pass
-            self._cursor = None
-        if self._connection:
+            self._local.cursor = None
+        
+        if hasattr(self._local, 'connection') and self._local.connection:
             try:
-                self._connection.close()
+                self._local.connection.close()
             except:
                 pass
-            self._connection = None
+            self._local.connection = None
 
     def ensure_connection(self):
-        """Ensure connection is active with minimal overhead"""
-        if not self._connection:
-            self.connect()
-        if not self._cursor:
-            self._cursor = self._connection.cursor()
+        """Ensure connection is active for current thread"""
+        self._get_connection()
+        self._get_cursor()
 
     @contextmanager
     def get_cursor(self):
@@ -60,60 +74,71 @@ class MariaDBConnection(DatabaseConnection):
         self.ensure_connection()
         cursor = None
         try:
-            cursor = self._connection.cursor()
+            cursor = self._get_connection().cursor()
             yield cursor
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                except:
+                    pass
 
     @contextmanager
     def transaction(self):
         """Transaction context manager"""
-        self.ensure_connection()
+        conn = self._get_connection()
         cursor = None
         try:
-            cursor = self._connection.cursor()
+            cursor = conn.cursor()
             yield cursor
-            self._connection.commit()
+            conn.commit()
         except Exception as e:
-            if self._connection:
-                self._connection.rollback()
+            try:
+                conn.rollback()
+            except:
+                pass
             raise e
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                except:
+                    pass
 
     def execute_query(self, query: str, params: tuple = None) -> Any:
         """Execute SQL query with parameters"""
         self.ensure_connection()
         if params is not None and not isinstance(params, (tuple, dict)):
             params = (params,)
-        self._cursor.execute(query, params)
-        return self._cursor
+        
+        cursor = self._local.cursor
+        cursor.execute(query, params)
+        return cursor
 
     def executemany(self, query: str, params: List[tuple]) -> Any:
         """Execute SQL query with multiple parameter sets"""
         self.ensure_connection()
-        self._cursor.executemany(query, params)
-        return self._cursor
+        cursor = self._local.cursor
+        cursor.executemany(query, params)
+        return cursor
 
     def commit(self) -> None:
-        """Commit transaction"""
-        if self._connection:
-            self._connection.commit()
+        """Commit transaction for current thread"""
+        if hasattr(self._local, 'connection') and self._local.connection:
+            self._local.connection.commit()
 
     def rollback(self) -> None:
-        """Rollback transaction"""
-        if self._connection:
-            self._connection.rollback()
+        """Rollback transaction for current thread"""
+        if hasattr(self._local, 'connection') and self._local.connection:
+            self._local.connection.rollback()
 
     @property
     def is_connected(self) -> bool:
-        """Check if connection is active"""
+        """Check if connection is active for current thread"""
         try:
-            if not self._connection:
+            if not hasattr(self._local, 'connection') or not self._local.connection:
                 return False
-            self._connection.ping(False)
+            self._local.connection.ping(False)
             return True
         except (mariadb.Error, AttributeError):
             return False
@@ -121,19 +146,21 @@ class MariaDBConnection(DatabaseConnection):
     def get_server_info(self) -> Optional[str]:
         """Get MariaDB server version info"""
         try:
-            return self._connection.get_server_info()
+            if hasattr(self._local, 'connection'):
+                return self._local.connection.get_server_info()
         except:
-            return None
+            pass
+        return None
 
     def set_autocommit(self, autocommit: bool) -> None:
-        """Set autocommit mode"""
-        if self._connection:
-            self._connection.autocommit = autocommit
+        """Set autocommit mode for current thread"""
+        if hasattr(self._local, 'connection') and self._local.connection:
+            self._local.connection.autocommit = autocommit
 
     def get_warnings(self) -> List[Any]:
         """Get warnings from last operation"""
-        if self._cursor:
-            return self._cursor.fetchwarnings()
+        if hasattr(self._local, 'cursor') and self._local.cursor:
+            return self._local.cursor.fetchwarnings()
         return []
 
 
