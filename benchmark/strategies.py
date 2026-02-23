@@ -2,7 +2,7 @@ import time
 from typing import List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from benchmark.base_benchmark import BaseBenchmark
-from models.benchmark_results import BenchmarkMetrics
+from models.benchmark_results import BenchmarkMetrics, BenchmarkResult
 
 
 class SingleInsertBenchmark(BaseBenchmark):
@@ -93,3 +93,39 @@ class ConcurrentInsertBenchmark(BaseBenchmark):
             for future in as_completed(futures):
                 worker_timings = future.result()
                 metrics.timings.extend(worker_timings)
+
+
+class FillTables(BatchInsertBenchmark):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.batch_size = 1000
+
+    def execute(self) -> BenchmarkResult:
+        """Execute the benchmark"""
+        print(f"\n{'='*60}")
+        print(f"Starting {self.database_type.upper()} - {self.test_name}")
+        print(f"{'='*60}")
+        self.notify_start(self.test_name)
+        # Setup
+        self._setup()
+        # Prepare metrics
+        metrics = BenchmarkMetrics()
+        metrics.start_time = time.time()
+        # Execute benchmark
+        self._execute_benchmark(metrics)
+        # Finalize metrics
+        metrics.end_time = time.time()
+        # Create result
+        result = BenchmarkResult(
+            database_type=self.database_type,
+            test_name=self.test_name,
+            iterations=self.iterations,
+            metrics=metrics,
+            configuration={
+                "warmup_iterations": self.warmup_iterations,
+                "table_name": self.table_name,
+            },
+        )
+        # Notify completion
+        self.notify_complete(result)
+        return result
