@@ -1,7 +1,12 @@
 from datetime import datetime
 from utils.config import ConfigManager
 from database.connection_factory import DatabaseConnectionFactory
-from benchmark.strategies import SingleInsertBenchmark, BatchInsertBenchmark, ConcurrentInsertBenchmark
+from benchmark.strategies import (
+    SingleInsertBenchmark,
+    BatchInsertBenchmark,
+    ConcurrentInsertBenchmark,
+    FillTables,
+)
 from metrics.collector import MetricsCollector
 from metrics.reporter import ReportGenerator
 
@@ -95,6 +100,29 @@ class BenchmarkRunner:
             finally:
                 benchmark.cleanup()
                 connection.disconnect()
+
+    def run_fill_table(self) -> None:
+        """Run fill table"""
+        TABLE_NAME = "test_table"
+        print("\n" + "=" * 80)
+        print("RUNNING FILL TABLE")
+        print("=" * 80)
+        connection = self.connection_factory.create_connection(self.config_manager)
+        repository = self.connection_factory.create_repository(connection)
+        benchmark = FillTables(
+            repository=repository,
+            database_type=self.db_config.database,
+            test_name="fill_table",
+            table_name=TABLE_NAME,
+            iterations=self.benchmark_config.iterations,
+            warmup_iterations=self.benchmark_config.warmup_iterations,
+        )
+        benchmark.attach(self.metrics_collector)
+        try:
+            connection.connect()
+            benchmark.execute()
+        finally:
+            connection.disconnect()
 
     def generate_reports(self) -> None:
         """Generate all reports"""
