@@ -6,6 +6,7 @@ from benchmark.strategies import (
     BatchInsertBenchmark,
     ConcurrentInsertBenchmark,
     FillTables,
+    UpdateRowBenchmark,
 )
 from metrics.collector import MetricsCollector
 from metrics.reporter import ReportGenerator
@@ -113,6 +114,29 @@ class BenchmarkRunner:
             repository=repository,
             database_type=self.db_config.database,
             test_name="fill_table",
+            table_name=TABLE_NAME,
+            iterations=self.benchmark_config.iterations,
+            warmup_iterations=self.benchmark_config.warmup_iterations,
+        )
+        benchmark.attach(self.metrics_collector)
+        try:
+            connection.connect()
+            benchmark.execute()
+        finally:
+            connection.disconnect()
+
+    def run_update_row(self) -> None:
+        """Run update row benchmark for all databases"""
+        TABLE_NAME = "test_table"
+        print("\n" + "=" * 80)
+        print("RUNNING UPDATE ROW BENCHMARK")
+        print("=" * 80)
+        connection = self.connection_factory.create_connection(self.config_manager)
+        repository = self.connection_factory.create_repository(connection)
+        benchmark = UpdateRowBenchmark(
+            repository=repository,
+            database_type=self.db_config.database,
+            test_name="update_row",
             table_name=TABLE_NAME,
             iterations=self.benchmark_config.iterations,
             warmup_iterations=self.benchmark_config.warmup_iterations,
