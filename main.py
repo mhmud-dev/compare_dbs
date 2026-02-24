@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument(
         "--test",
         type=str,
-        choices=["single", "batch", "concurrent"],
+        choices=["single", "batch", "concurrent", "fill", "update"],
         default="single",
         help="Test type to run (default: single)",
     )
@@ -70,7 +70,12 @@ def main():
             runner.run_batch_insert_benchmark()
         if args.test == "concurrent":
             runner.run_concurrent_insert_benchmark()
-        runner.generate_reports()
+        if args.test == "fill":
+            runner.run_fill_table()
+        if args.test == "update":
+            runner.run_update_row()
+        if args.test != "fill":
+            runner.generate_reports()
     except KeyboardInterrupt:
         print("\n\nBenchmark interrupted by user.")
         sys.exit(1)
