@@ -29,6 +29,14 @@ class TestDataGenerator:
         }
 
     @staticmethod
+    def generate_update_row(index) -> Dict[str, Any]:
+        """Generate a single row of test data"""
+        return {
+            "col3": index * random.uniform(0.5, 2.0),
+            "col4": f"Long text data for row {index} " * random.randint(1, 3),
+        }
+
+    @staticmethod
     def generate_batch(test_name: str, size: int) -> List[Dict[str, Any]]:
         """Generate a batch of test data"""
         return [TestDataGenerator.generate_row(test_name, i) for i in range(size)]
