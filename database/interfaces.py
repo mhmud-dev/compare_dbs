@@ -55,6 +55,11 @@ class DatabaseRepository(ABC):
         pass
 
     @abstractmethod
+    def update_row(self, table_name: str, row_id: int, data: Dict[str, Any]) -> bool:
+        """update a single row"""
+        pass
+
+    @abstractmethod
     def insert_batch(self, table_name: str, data: List[Dict[str, Any]]) -> int:
         """Insert multiple rows"""
         pass
