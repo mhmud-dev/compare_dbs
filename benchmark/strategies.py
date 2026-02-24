@@ -129,3 +129,49 @@ class FillTables(BatchInsertBenchmark):
         # Notify completion
         self.notify_complete(result)
         return result
+
+
+class UpdateRowBenchmark(BaseBenchmark):
+    """Benchmark for update a row"""
+
+    def _execute_benchmark(self, metrics: BenchmarkMetrics) -> None:
+        """Execute update row benchmark"""
+        print(f"  Running update row benchmark ({self.iterations} iterations)...")
+
+        for i in range(self.iterations):
+            iteration_start = time.time()
+            data = self.data_generator.generate_update_row(i)
+            self.repository.update_row(self.table_name, i + 1, data)
+            iteration_time = time.time() - iteration_start
+            metrics.timings.append(iteration_time)
+            self.notify_iteration(i + 1, self.iterations)
+
+    def execute(self) -> BenchmarkResult:
+        """Execute the benchmark"""
+        print(f"\n{'='*60}")
+        print(f"Starting {self.database_type.upper()} - {self.test_name}")
+        print(f"{'='*60}")
+        self.notify_start(self.test_name)
+        # Setup
+        self._setup()
+        # Prepare metrics
+        metrics = BenchmarkMetrics()
+        metrics.start_time = time.time()
+        # Execute benchmark
+        self._execute_benchmark(metrics)
+        # Finalize metrics
+        metrics.end_time = time.time()
+        # Create result
+        result = BenchmarkResult(
+            database_type=self.database_type,
+            test_name=self.test_name,
+            iterations=self.iterations,
+            metrics=metrics,
+            configuration={
+                "warmup_iterations": self.warmup_iterations,
+                "table_name": self.table_name,
+            },
+        )
+        # Notify completion
+        self.notify_complete(result)
+        return result
