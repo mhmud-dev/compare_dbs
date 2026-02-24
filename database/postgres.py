@@ -246,6 +246,17 @@ class PostgreSQLRepository(DatabaseRepository):
             cursor.execute(query, flat_values)
             return len(data)
 
+    def update_row(self, table_name: str, row_id: int, data: Dict[str, Any]) -> bool:
+        """Update a single row by ID"""
+        if not data:
+            return False
+        set_clause = ", ".join([f"{column} = %s" for column in data.keys()])
+        query = f"UPDATE {table_name} SET {set_clause} WHERE id = %s"
+        values = tuple(data.values()) + (row_id,)
+        with self.connection.transaction() as cursor:
+            cursor.execute(query, values)
+            return cursor.rowcount > 0
+
     def get_table_size(self, table_name: str) -> int:
         """Get row count of table"""
         query = f"SELECT COUNT(*) FROM {table_name}"

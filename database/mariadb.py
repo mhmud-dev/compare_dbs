@@ -8,7 +8,7 @@ from utils.config import DatabaseConfig
 
 class MariaDBConnection(DatabaseConnection):
     """MariaDB connection"""
-    
+
     def __init__(self, config: DatabaseConfig):
         self.config = config
         self._local = threading.local()
@@ -16,7 +16,7 @@ class MariaDBConnection(DatabaseConnection):
 
     def _get_connection(self):
         """Get or create thread-local connection"""
-        if not hasattr(self._local, 'connection') or self._local.connection is None:
+        if not hasattr(self._local, "connection") or self._local.connection is None:
             try:
                 connection_params = {
                     "host": self.config.host,
@@ -38,7 +38,7 @@ class MariaDBConnection(DatabaseConnection):
 
     def _get_cursor(self):
         """Get or create thread-local cursor"""
-        if not hasattr(self._local, 'cursor') or self._local.cursor is None:
+        if not hasattr(self._local, "cursor") or self._local.cursor is None:
             conn = self._get_connection()
             self._local.cursor = conn.cursor()
         return self._local.cursor
@@ -49,17 +49,17 @@ class MariaDBConnection(DatabaseConnection):
 
     def disconnect(self) -> None:
         """Close MariaDB connection for current thread"""
-        if hasattr(self._local, 'cursor') and self._local.cursor:
+        if hasattr(self._local, "cursor") and self._local.cursor:
             try:
                 self._local.cursor.close()
-            except:
+            except Exception:
                 pass
             self._local.cursor = None
-        
-        if hasattr(self._local, 'connection') and self._local.connection:
+
+        if hasattr(self._local, "connection") and self._local.connection:
             try:
                 self._local.connection.close()
-            except:
+            except Exception:
                 pass
             self._local.connection = None
 
@@ -80,7 +80,7 @@ class MariaDBConnection(DatabaseConnection):
             if cursor:
                 try:
                     cursor.close()
-                except:
+                except Exception:
                     pass
 
     @contextmanager
@@ -95,14 +95,14 @@ class MariaDBConnection(DatabaseConnection):
         except Exception as e:
             try:
                 conn.rollback()
-            except:
+            except Exception:
                 pass
             raise e
         finally:
             if cursor:
                 try:
                     cursor.close()
-                except:
+                except Exception:
                     pass
 
     def execute_query(self, query: str, params: tuple = None) -> Any:
@@ -110,7 +110,7 @@ class MariaDBConnection(DatabaseConnection):
         self.ensure_connection()
         if params is not None and not isinstance(params, (tuple, dict)):
             params = (params,)
-        
+
         cursor = self._local.cursor
         cursor.execute(query, params)
         return cursor
@@ -124,19 +124,19 @@ class MariaDBConnection(DatabaseConnection):
 
     def commit(self) -> None:
         """Commit transaction for current thread"""
-        if hasattr(self._local, 'connection') and self._local.connection:
+        if hasattr(self._local, "connection") and self._local.connection:
             self._local.connection.commit()
 
     def rollback(self) -> None:
         """Rollback transaction for current thread"""
-        if hasattr(self._local, 'connection') and self._local.connection:
+        if hasattr(self._local, "connection") and self._local.connection:
             self._local.connection.rollback()
 
     @property
     def is_connected(self) -> bool:
         """Check if connection is active for current thread"""
         try:
-            if not hasattr(self._local, 'connection') or not self._local.connection:
+            if not hasattr(self._local, "connection") or not self._local.connection:
                 return False
             self._local.connection.ping(False)
             return True
@@ -146,20 +146,20 @@ class MariaDBConnection(DatabaseConnection):
     def get_server_info(self) -> Optional[str]:
         """Get MariaDB server version info"""
         try:
-            if hasattr(self._local, 'connection'):
+            if hasattr(self._local, "connection"):
                 return self._local.connection.get_server_info()
-        except:
+        except Exception:
             pass
         return None
 
     def set_autocommit(self, autocommit: bool) -> None:
         """Set autocommit mode for current thread"""
-        if hasattr(self._local, 'connection') and self._local.connection:
+        if hasattr(self._local, "connection") and self._local.connection:
             self._local.connection.autocommit = autocommit
 
     def get_warnings(self) -> List[Any]:
         """Get warnings from last operation"""
-        if hasattr(self._local, 'cursor') and self._local.cursor:
+        if hasattr(self._local, "cursor") and self._local.cursor:
             return self._local.cursor.fetchwarnings()
         return []
 
@@ -224,6 +224,17 @@ class MariaDBRepository(DatabaseRepository):
         with self.connection.transaction() as cursor:
             cursor.execute(query, flat_values)
             return len(data)
+
+    def update_row(self, table_name: str, row_id: int, data: Dict[str, Any]) -> bool:
+        """Update a single row by ID"""
+        if not data:
+            return False
+        set_clause = ", ".join([f"{column} = %s" for column in data.keys()])
+        query = f"UPDATE {table_name} SET {set_clause} WHERE id = %s"
+        values = tuple(data.values()) + (row_id,)
+        with self.connection.transaction() as cursor:
+            cursor.execute(query, values)
+            return cursor.rowcount > 0
 
     def get_table_size(self, table_name: str) -> int:
         """Get row count of table"""
